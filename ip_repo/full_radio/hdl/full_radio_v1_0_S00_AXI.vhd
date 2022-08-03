@@ -16,7 +16,10 @@ entity full_radio_v1_0_S00_AXI is
 	);
 	port (
 		-- Users to add ports here
-        m_axis_tdata : out std_logic_vector(15 downto 0);
+		--ADC DDS COMPILER PORTS
+        
+        
+        m_axis_tdata : out std_logic_vector(31 downto 0);
         m_axis_tvalid : out std_logic;
 		-- User ports ends
 		-- Do not modify the ports beyond this line
@@ -119,6 +122,31 @@ architecture arch_imp of full_radio_v1_0_S00_AXI is
 	signal byte_index	: integer;
 	signal aw_en	: std_logic;
 
+    --ADDED signals
+    signal FAKE_ADC_axis_tdata : std_logic_vector(15 downto 0);
+    signal    FAKE_ADC_axis_tvalid : std_logic;
+              --TUNING DDS COMPILER PORTS
+    signal    TUNER_DDS_axis_tdata : std_logic_vector(31 downto 0);
+    signal    TUNER_DDS_axis_tvalid : std_logic;
+        --CMPX MULT PORTS
+    signal    CMPX_MULT_axis_tdata : std_logic_vector(63 downto 0);
+    signal    CMPX_MULT_axis_tvalid : std_logic;
+        
+        --CMPX MULT PORTS
+    signal    IMAG_FIR_axis_tdata : std_logic_vector(39 downto 0);
+    signal    IMAG_FIR_axis_tvalid : std_logic;
+        
+        --CMPX MULT PORTS
+    signal    REAL_FIR_axis_tdata : std_logic_vector(39 downto 0);
+    signal    REAL_FIR_axis_tvalid : std_logic;
+        
+    signal    IMAG_FIR_FINAL_axis_tdata : std_logic_vector(23 downto 0);
+    signal    REAL_FIR_FINAL_axis_tdata :  std_logic_vector(23 downto 0);
+
+    signal    DDS_reset: std_logic;
+    signal    COUNTER_SIG: std_logic_vector(31 downto 0);
+
+--FAKE ADC AND TUNING DDS COMPONENT
 COMPONENT dds_compiler_0
   PORT (
     aclk : IN STD_LOGIC;
@@ -129,7 +157,57 @@ COMPONENT dds_compiler_0
     m_axis_data_tdata : OUT STD_LOGIC_VECTOR(15 DOWNTO 0)
   );
     END COMPONENT;
-
+    COMPONENT dds_compiler_1
+  PORT (
+    aclk : IN STD_LOGIC;
+    aresetn : IN STD_LOGIC;
+    s_axis_config_tvalid : IN STD_LOGIC;
+    s_axis_config_tdata : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
+    m_axis_data_tvalid : OUT STD_LOGIC;
+    m_axis_data_tdata : OUT STD_LOGIC_VECTOR(31 DOWNTO 0)
+  );
+END COMPONENT;
+--COMPLEX MULTIPLIER COMPONENT
+COMPONENT cmpy_0
+  PORT (
+    aclk : IN STD_LOGIC;
+    s_axis_a_tvalid : IN STD_LOGIC;
+    s_axis_a_tdata : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
+    s_axis_b_tvalid : IN STD_LOGIC;
+    s_axis_b_tdata : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
+    m_axis_dout_tvalid : OUT STD_LOGIC;
+    m_axis_dout_tdata : OUT STD_LOGIC_VECTOR(63 DOWNTO 0)
+  );
+END COMPONENT;
+--FIR COMPILER COMPONENT
+COMPONENT fir_compiler_0
+  PORT (
+    aresetn : IN STD_LOGIC;
+    aclk : IN STD_LOGIC;
+    s_axis_data_tvalid : IN STD_LOGIC;
+    s_axis_data_tready : OUT STD_LOGIC;
+    s_axis_data_tdata : IN STD_LOGIC_VECTOR(15 DOWNTO 0);
+    m_axis_data_tvalid : OUT STD_LOGIC;
+    m_axis_data_tdata : OUT STD_LOGIC_VECTOR(39 DOWNTO 0)
+  );
+END COMPONENT;
+COMPONENT fir_compiler_1
+  PORT (
+    aresetn : IN STD_LOGIC;
+    aclk : IN STD_LOGIC;
+    s_axis_data_tvalid : IN STD_LOGIC;
+    s_axis_data_tready : OUT STD_LOGIC;
+    s_axis_data_tdata : IN STD_LOGIC_VECTOR(39 DOWNTO 0);
+    m_axis_data_tvalid : OUT STD_LOGIC;
+    m_axis_data_tdata : OUT STD_LOGIC_VECTOR(23 DOWNTO 0)
+  );
+END COMPONENT;
+COMPONENT c_counter_binary_0
+  PORT (
+    CLK : IN STD_LOGIC;
+    Q : OUT STD_LOGIC_VECTOR(31 DOWNTO 0)
+  );
+END COMPONENT;
 begin
 	-- I/O Connections assignments
 
@@ -263,7 +341,7 @@ begin
 	              if ( S_AXI_WSTRB(byte_index) = '1' ) then
 	                -- Respective byte enables are asserted as per write strobes                   
 	                -- slave registor 3
-	                slv_reg3(byte_index*8+7 downto byte_index*8) <= S_AXI_WDATA(byte_index*8+7 downto byte_index*8);
+	                --slv_reg3(byte_index*8+7 downto byte_index*8) <= S_AXI_WDATA(byte_index*8+7 downto byte_index*8);
 	              end if;
 	            end loop;
 	          when others =>
@@ -367,11 +445,11 @@ begin
 	      when b"00" =>
 	        reg_data_out <= slv_reg0;
 	      when b"01" =>
-	        reg_data_out <= x"DEADBEEF";
+	        reg_data_out <= slv_reg1;
 	      when b"10" =>
 	        reg_data_out <= slv_reg2;
 	      when b"11" =>
-	        reg_data_out <= slv_reg3;
+	        reg_data_out <= COUNTER_SIG;
 	      when others =>
 	        reg_data_out  <= (others => '0');
 	    end case;
@@ -398,17 +476,89 @@ begin
 
 	-- Add user logic here
 
-your_instance_name : dds_compiler_0
+FAKE_ADC : dds_compiler_0
+  PORT MAP (
+    aclk => s_axi_aclk,
+    aresetn => not DDS_reset,
+    s_axis_phase_tvalid => '1',
+    s_axis_phase_tdata => slv_reg0,
+    m_axis_data_tvalid => FAKE_ADC_axis_tvalid,
+    m_axis_data_tdata => FAKE_ADC_axis_tdata
+  );
+  
+  TUNER_DDS : dds_compiler_1
   PORT MAP (
     aclk => s_axi_aclk,
     aresetn => '1',
-    s_axis_phase_tvalid => '1',
-    s_axis_phase_tdata => slv_reg0,
-    m_axis_data_tvalid => m_axis_tvalid,
-    m_axis_data_tdata => m_axis_tdata
+    s_axis_config_tvalid => '1',
+    s_axis_config_tdata => slv_reg1,
+    m_axis_data_tvalid => TUNER_DDS_axis_tvalid,
+    m_axis_data_tdata => TUNER_DDS_axis_tdata
   );
 
-
+CMPX_MULT : cmpy_0
+  PORT MAP (
+    aclk => s_axi_aclk,
+    s_axis_a_tvalid => '1',
+    s_axis_a_tdata => "0000000000000000" & FAKE_ADC_axis_tdata,
+    s_axis_b_tvalid => '1',
+    s_axis_b_tdata => TUNER_DDS_axis_tdata,
+    m_axis_dout_tvalid => CMPX_MULT_axis_tvalid,
+    m_axis_dout_tdata => CMPX_MULT_axis_tdata
+  );
+  
+  IMAG_FIR_1 : fir_compiler_0
+  PORT MAP (
+    aresetn => '1',
+    aclk => s_axi_aclk,
+    s_axis_data_tvalid => '1',
+    s_axis_data_tready => open,
+    s_axis_data_tdata => CMPX_MULT_axis_tdata(61 downto 46),
+    m_axis_data_tvalid => IMAG_FIR_axis_tvalid,
+    m_axis_data_tdata => IMAG_FIR_axis_tdata
+  );
+  
+  IMAG_FIR_2 : fir_compiler_1
+  PORT MAP (
+    aresetn => '1',
+    aclk => s_axi_aclk,
+    s_axis_data_tvalid => IMAG_FIR_axis_tvalid,
+    s_axis_data_tready => open,
+    s_axis_data_tdata => IMAG_FIR_axis_tdata,
+    m_axis_data_tvalid => open,
+    m_axis_data_tdata => IMAG_FIR_FINAL_axis_tdata
+  );
+  
+  REAL_FIR_1 : fir_compiler_0
+  PORT MAP (
+    aresetn => '1',
+    aclk => s_axi_aclk,
+    s_axis_data_tvalid => '1',
+    s_axis_data_tready => open,
+    s_axis_data_tdata => CMPX_MULT_axis_tdata(61 downto 46),
+    m_axis_data_tvalid => REAL_FIR_axis_tvalid,
+    m_axis_data_tdata => REAL_FIR_axis_tdata
+  );
+  
+  REAL_FIR_2 : fir_compiler_1
+  PORT MAP (
+    aresetn => '1',
+    aclk => s_axi_aclk,
+    s_axis_data_tvalid => '1',
+    s_axis_data_tready => open,
+    s_axis_data_tdata => REAL_FIR_axis_tdata,
+    m_axis_data_tvalid => open,
+    m_axis_data_tdata => REAL_FIR_FINAL_axis_tdata
+  );
+  
+  COUNTER_REG : c_counter_binary_0
+  PORT MAP (
+    CLK => s_axi_aclk,
+    Q => COUNTER_SIG
+  );
+  
+  m_axis_tdata <= IMAG_FIR_FINAL_axis_tdata(15 downto 0) & REAL_FIR_FINAL_axis_tdata(15 downto 0);
+  DDS_reset <= slv_reg2(0);
 	-- User logic ends
-
+    
 end arch_imp;
